@@ -1,0 +1,96 @@
+version: '3'
+
+services:
+  db:
+    image: postgres:13
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=finance_platform
+    networks:
+      - platform_network
+
+  redis:
+    image: redis:6
+    networks:
+      - platform_network
+
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8002:8002"
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=finance_platform
+      - REDIS_HOST=redis
+    depends_on:
+      - db
+      - redis
+    networks:
+      - platform_network
+
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - platform_network
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "8083:80"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./frontend/dist:/usr/share/nginx/html
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - platform_network
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.worker worker -l info
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=finance_platform
+    depends_on:
+      - db
+      - redis
+    networks:
+      - platform_network
+
+networks:
+  platform_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
